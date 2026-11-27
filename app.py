@@ -343,15 +343,27 @@ if st.button(
     width="stretch",
 ):
   target_list = DEFAULT_WATCHLIST + st.session_state.custom_list
-  with st.spinner("過去6年分の株価・財務・配当データを分析中..."):
-    with ThreadPoolExecutor(max_workers=4) as executor:
-      raw_results = list(executor.map(analyze_mtf_stock, target_list))
+  valid_results = []
+  progress_bar = st.progress(0)
+  status_text = st.empty()
 
-  valid_results = [r for r in raw_results if r is not None]
+  for idx, item in enumerate(target_list):
+    status_text.text(f"取得中 ({idx + 1}/{len(target_list)}): {item[1]} ...")
+    res = analyze_mtf_stock(item)
+    if res is not None:
+      valid_results.append(res)
+    progress_bar.progress((idx + 1) / len(target_list))
+
+  status_text.empty()
+  progress_bar.empty()
+
   if valid_results:
     st.session_state.df_res = pd.DataFrame(valid_results)
   else:
-    st.error("データの取得に失敗しました。少し時間をおいて再度お試しください。")
+    st.error(
+        "データの取得に失敗しました。Yahoo Financeの一時制限の可能性があるため、1〜2分おいて再度お試しください。"
+    )
+
 
 if "df_res" in st.session_state:
   df_show = st.session_state.df_res.copy()
