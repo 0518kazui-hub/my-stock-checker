@@ -1,6 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 import time
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
@@ -9,18 +11,18 @@ import yfinance as yf
 # 1. ページ基本設定（スマホ画面に最適化）
 # ====================================================
 st.set_page_config(
-    page_title="My株チェッカー",
+    page_title="My株チェッカー Pro",
     page_icon="📈",
     layout="wide",
 )
 
-# 簡易パスワード保護（不要な場合は下のブロックを削除してください）
-APP_PASSWORD = "7777"  # ← お好きな4桁などのパスワードに変更できます
+# 簡易パスワード保護
+APP_PASSWORD = "7777"
 if "authenticated" not in st.session_state:
   st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-  st.title("📈 My株チェッカー（ログイン）")
+  st.title("📈 My株チェッカー Pro（ログイン）")
   pwd = st.text_input("パスワードを入力してください", type="password")
   if st.button("ログイン"):
     if pwd == APP_PASSWORD:
@@ -31,10 +33,10 @@ if not st.session_state.authenticated:
   st.stop()
 
 # ====================================================
-# 2. デフォルトの保有株・国策ウォッチリスト（自由に追加・編集可能）
+# 2. デフォルトの保有株・国策ウォッチリスト（全19社）
 # ====================================================
 DEFAULT_WATCHLIST = [
-    # --- 保有・買付依頼中の主力ポートフォリオ（8社） ---
+    # --- 保有・買付依頼中の主力ポートフォリオ ---
     ("9434.T", "ソフトバンク", "【保有】通信インフラ"),
     ("9432.T", "NTT", "【保有】通信インフラ"),
     ("1414.T", "ショーボンドHD", "【保有】国策インフラ補修"),
@@ -55,140 +57,146 @@ DEFAULT_WATCHLIST = [
     ("7013.T", "IHI", "【防衛】航空エンジン・宇宙"),
     ("6503.T", "三菱電機", "【防衛】防衛レーダー・電子"),
     ("6701.T", "NEC", "【防衛】防衛通信・サイバー"),
-    # --- 監視候補：割安高配当インフラ ---
+    # --- 監視・打診候補：高配当インフラ ---
     ("1911.T", "住友林業", "【監視】住宅・資源インフラ"),
+    ("5805.T", "ＳＷＣＣ", "【監視】電力・DCケーブル"),
 ]
 
 
 # ====================================================
-# 3. 財務・利回り計算用ヘルパー関数
+# 3. テクニカル＆財務計算ヘルパー関数
 # ====================================================
+def calc_rsi(series, period=14):
+  delta = series.diff()
+  gain = delta.clip(lower=0)
+  loss = -delta.clip(upper=0)
+  avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+  avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+  rs = avg_gain / avg_loss.replace(0, np.nan)
+  rsi = 100 - (100 / (1 + rs))
+  return rsi.fillna(50.0)
+
+
+def calc_range_pct(series, current_val):
+  s_min = float(series.min())
+  s_max = float(series.max())
+  if s_max <= s_min:
+    return 50.0
+  return ((current_val - s_min) / (s_max - s_min)) * 100.0
+
+
 def get_first_valid_value(df, col, candidate_keys):
   for key in candidate_keys:
     if key in df.index:
       val = df.loc[key, col]
       if isinstance(val, pd.Series):
-        val = val.dropna().iloc if not val.dropna().empty else None
+        val = val.dropna().head(1).item() if not val.dropna().empty else None
       if val is not None and pd.notna(val):
         return float(val)
   return None
 
 
-def calc_dividend_streak(divs_series):
-  if divs_series.empty:
-    return 0, 0
-  annual_divs = divs_series.groupby(divs_series.index.year).sum()
-  current_year = pd.Timestamp.now().year
-  completed_years = annual_divs[annual_divs.index < current_year]
-  if len(completed_years) < 2:
-    return 0, 0
-  vals = completed_years.values
-  inc_streak = 0
-  non_dec_streak = 0
-  for i in range(len(vals) - 1, 0, -1):
-    if vals[i] > vals[i - 1] * 1.001:
-      inc_streak += 1
-    else:
-      break
-  for i in range(len(vals) - 1, 0, -1):
-    if vals[i] >= vals[i - 1] * 0.999:
-      non_dec_streak += 1
-    else:
-      break
-  return inc_streak, non_dec_streak
-
-
-def analyze_single_stock(item):
+def analyze_mtf_stock(item):
   code, stock_name, tag = item
-  now_normalized = pd.Timestamp.now().normalize()
-  three_years_ago = now_normalized - pd.DateOffset(years=3)
-  one_year_ago = now_normalized - pd.DateOffset(years=1)
-  six_months_ago = now_normalized - pd.DateOffset(months=6)
+  now_norm = pd.Timestamp.now().normalize()
+  dt_5y = now_norm - pd.DateOffset(years=5)
+  dt_3y = now_norm - pd.DateOffset(years=3)
+  dt_1y = now_norm - pd.DateOffset(years=1)
+  dt_6m = now_norm - pd.DateOffset(months=6)
+  dt_3m = now_norm - pd.DateOffset(months=3)
+  dt_1m = now_norm - pd.DateOffset(months=1)
   tax_rate = 0.30
 
   try:
     time.sleep(0.25)
     ticker = yf.Ticker(code)
 
-    current_price = ticker.fast_info.get("lastPrice")
-    if not current_price or pd.isna(current_price):
-      return None
-
-    market_cap_raw = ticker.fast_info.get("marketCap")
-    market_cap_yen = float(market_cap_raw) if market_cap_raw else 0.0
-
-    divs = ticker.dividends
-    if divs.empty:
-      div_yield = 0.0
-      non_dec_streak = 0
-    else:
-      divs.index = pd.to_datetime(divs.index).tz_localize(None).normalize()
-      divs = divs.groupby(divs.index).sum()
-      trailing_1y_div = divs[divs.index >= one_year_ago].sum()
-      div_yield = (trailing_1y_div / current_price) * 100
-      _, non_dec_streak = calc_dividend_streak(divs)
-
-    # 過去3年間の配当利回り時系列計算
-    hist = ticker.history(period="5y")
-    if hist.empty:
+    hist = ticker.history(period="6y")
+    if hist.empty or len(hist) < 250:
       return None
     hist.index = pd.to_datetime(hist.index).tz_localize(None).normalize()
 
-    df_price = pd.DataFrame(index=hist.index)
-    df_price["Close"] = hist["Close"]
-    df_price["Dividends"] = 0.0
-    if not divs.empty:
-      for div_date, div_amount in divs.items():
-        valid_dates = df_price.index[df_price.index >= div_date]
-        if not valid_dates.empty:
-          df_price.loc[next(iter(valid_dates)), "Dividends"] += float(div_amount)
-    df_price["Trailing_1Y_Div"] = df_price["Dividends"].rolling("365D").sum()
-    df_price["Dividend_Yield"] = (
-        df_price["Trailing_1Y_Div"] / df_price["Close"]
-    ) * 100
+    df = pd.DataFrame(index=hist.index)
+    df["Close"] = hist["Close"]
+    df["MA25"] = df["Close"].rolling(25).mean()
+    df["MA75"] = df["Close"].rolling(75).mean()
+    df["MA200"] = df["Close"].rolling(200).mean()
+    df["RSI14"] = calc_rsi(df["Close"], 14)
 
-    df_3y = df_price[df_price.index >= three_years_ago].copy()
-    if df_3y.empty:
+    divs = ticker.dividends
+    df["Dividends"] = 0.0
+    if not divs.empty:
+      divs.index = pd.to_datetime(divs.index).tz_localize(None).normalize()
+      divs = divs.groupby(divs.index).sum()
+      for d_date, d_amt in divs.items():
+        v_dates = df.index[df.index >= d_date]
+        if not v_dates.empty:
+          df.loc[next(iter(v_dates)), "Dividends"] += float(d_amt)
+
+    df["Trailing_1Y_Div"] = df["Dividends"].rolling("365D").sum()
+    df["Div_Yield"] = (df["Trailing_1Y_Div"] / df["Close"]) * 100.0
+
+    df_5y = df[df.index >= dt_5y].copy()
+    df_3y = df[df.index >= dt_3y].copy()
+    df_1y = df[df.index >= dt_1y].copy()
+    df_6m = df[df.index >= dt_6m].copy()
+    df_3m = df[df.index >= dt_3m].copy()
+    df_1m = df[df.index >= dt_1m].copy()
+
+    if df_3y.empty or df_1m.empty:
       return None
 
-    max_val = float(df_3y["Dividend_Yield"].max())
-    min_val = float(df_3y["Dividend_Yield"].min())
-    mean_val = float(df_3y["Dividend_Yield"].mean())
-    latest_val = float(df_3y["Dividend_Yield"].tail(1).squeeze())
+    latest_close = float(df["Close"].iloc[-1])
+    latest_yield = float(df["Div_Yield"].iloc[-1])
+    latest_rsi = float(df["RSI14"].iloc[-1])
+    ma25 = float(df["MA25"].iloc[-1])
+    ma200 = float(df["MA200"].iloc[-1])
 
-    past_1y_df = df_3y[df_3y.index <= one_year_ago]
-    yield_1y_ago = (
-        float(past_1y_df["Dividend_Yield"].tail(1).squeeze())
-        if not past_1y_df.empty
-        else float(df_3y["Dividend_Yield"].head(1).squeeze())
+    yield_pos_5y = calc_range_pct(df_5y["Div_Yield"], latest_yield)
+    yield_pos_3y = calc_range_pct(df_3y["Div_Yield"], latest_yield)
+    price_pos_5y = calc_range_pct(df_5y["Close"], latest_close)
+    price_pos_1y = calc_range_pct(df_1y["Close"], latest_close)
+    price_pos_6m = calc_range_pct(df_6m["Close"], latest_close)
+    dev_ma200 = ((latest_close - ma200) / ma200) * 100.0 if ma200 > 0 else 0.0
+    dev_ma25 = ((latest_close - ma25) / ma25) * 100.0 if ma25 > 0 else 0.0
+
+    first_1m_close = float(df_1m["Close"].head(1).item())
+    ret_1m = (
+        ((latest_close - first_1m_close) / first_1m_close) * 100.0
+        if len(df_1m) >= 2 and first_1m_close > 0
+        else 0.0
     )
-    past_6m_df = df_3y[df_3y.index <= six_months_ago]
-    yield_6m_ago = (
-        float(past_6m_df["Dividend_Yield"].tail(1).squeeze())
-        if not past_6m_df.empty
-        else yield_1y_ago
+    min_1m = float(df_1m["Close"].min())
+    rebound_from_1m_low = (
+        ((latest_close - min_1m) / min_1m) * 100.0 if min_1m > 0 else 0.0
     )
+    # ====================================================
+    # 4. 買い場スコア（0〜100点）＆ 売り場・過熱スコア（0〜100点）
+    # ====================================================
+    b_long = (yield_pos_3y * 0.20) + (yield_pos_5y * 0.15)
+    b_mid = ((100.0 - price_pos_1y) * 0.15) + ((100.0 - price_pos_6m) * 0.20)
+    b_rsi = min(max(60.0 - latest_rsi, 0.0) / 30.0, 1.0) * 15.0
+    b_ma25 = min(max(-dev_ma25, 0.0) / 8.0, 1.0) * 10.0
+    b_rebound = 5.0 if (0.5 <= rebound_from_1m_low <= 5.0) else 2.0
+    buy_score = round(min(b_long + b_mid + b_rsi + b_ma25 + b_rebound, 100.0), 1)
 
-    diff_3y_mean = latest_val - mean_val
-    diff_1y_ago = latest_val - yield_1y_ago
-    diff_6m_ago = latest_val - yield_6m_ago
+    s_long = ((100.0 - yield_pos_3y) * 0.20) + (price_pos_5y * 0.15)
+    s_ma200 = min(max(dev_ma200, 0.0) / 25.0, 1.0) * 20.0
+    s_mid = (price_pos_6m / 100.0) * 15.0
+    s_rsi = min(max(latest_rsi - 55.0, 0.0) / 25.0, 1.0) * 20.0
+    s_1m = min(max(ret_1m, 0.0) / 15.0, 1.0) * 10.0
+    sell_score = round(min(s_long + s_ma200 + s_mid + s_rsi + s_1m, 100.0), 1)
 
-    if (diff_3y_mean > 0) and (diff_1y_ago > 0) and (diff_6m_ago > 0):
-      trend_status = "🔥 3段階上昇（強い買い場）"
-    elif (diff_3y_mean > 0) and (diff_1y_ago > 0):
-      trend_status = "📈 中期上昇（直近一服）"
-    elif (diff_3y_mean > 0) and (diff_6m_ago > 0):
-      trend_status = "⚡ 直近反転上昇（初動）"
-    elif diff_3y_mean > 0:
-      trend_status = "➡️ 割安圏横ばい"
+    if buy_score >= 70.0 and sell_score <= 35.0:
+      signal_label = "🔥 絶好の買い場（長期割安×短期押し目）"
+    elif buy_score >= 58.0:
+      signal_label = "📈 買い検討圏（押し目水準）"
+    elif sell_score >= 72.0:
+      signal_label = "⚠️ 売り場・過熱警戒（一部利確検討）"
+    elif sell_score >= 60.0:
+      signal_label = "⚡ 高値圏・新規買い控え"
     else:
-      trend_status = "⬇️ 低下・割高圏"
-
-    range_position = (
-        ((latest_val - min_val) / (max_val - min_val)) * 100
-        if max_val > min_val
-        else 50.0
-    )
+      signal_label = "➡️ 中立・ホールド継続"
 
     # 財務・ROIC推移・FCF
     fin = ticker.financials
@@ -273,29 +281,29 @@ def analyze_single_stock(item):
         "コード": code.replace(".T", ""),
         "銘柄名": stock_name,
         "区分": tag,
+        "総合シグナル": signal_label,
+        "買い場スコア": buy_score,
+        "売り場スコア": sell_score,
         "現在株価(円)": round(current_price, 1),
-        "配当利回り(%)": round(div_yield, 2),
-        "3年レンジ位置(%)": round(range_position, 1),
-        "買い場判定": trend_status,
-        "3年平均利回り(%)": round(mean_val, 2),
-        "非減配(年)": non_dec_streak,
+        "配当利回り(%)": round(latest_yield, 2),
+        "3年利回り位置(%)": round(yield_pos_3y, 1),
+        "14日RSI": round(latest_rsi, 1),
+        "200日線乖離(%)": round(dev_ma200, 1),
         "ROIC推移": roic_trend_str,
         "FCF(億円)": fcf_oku,
         "自己資本比率(%)": equity_ratio,
-        "_df_3y": df_3y,
-        "_mean_val": mean_val,
+        "_dfs": (df_5y, df_3y, df_1y, df_6m, df_3m, df_1m),
     }
   except Exception:
     return None
 
 
 # ====================================================
-# 4. スマホアプリの画面UI
+# 5. スマホアプリの画面UI（6期間マルチタイムフレーム対応）
 # ====================================================
-st.title("📈 My株ウォッチリスト診断")
-st.caption("保有株 ＋ レアアース・防衛国策銘柄の15秒スピード健康診断")
+st.title("📈 My株チェッカー Pro")
+st.caption("5年・3年・1年・6M・3M・1Mの6期間統合 買い場＆売り場診断")
 
-# サイドバー：銘柄の追加・フィルター機能
 with st.sidebar:
   st.header("⚙️ 設定・銘柄追加")
   filter_tag = st.selectbox(
@@ -307,6 +315,10 @@ with st.sidebar:
           "防衛のみ",
           "監視のみ",
       ],
+  )
+  sort_mode = st.radio(
+      "並べ替え基準",
+      ["買い場スコア順（押し目探し）", "売り場スコア順（過熱・利確チェック）"],
   )
   st.divider()
   st.subheader("➕ 臨時で銘柄を追加監視")
@@ -325,28 +337,22 @@ with st.sidebar:
       st.session_state.custom_list.append((c_fmt, n_fmt, "【追加】カスタム"))
       st.success(f"{n_fmt} を追加しました！")
 
-# スキャン実行ボタン
 if st.button(
-    "🔍 最新データをスキャン（約15秒）",
+    "🔍 6期間データ一括スキャン（約15秒）",
     type="primary",
-    use_container_width=True,
+    width="stretch",
 ):
   target_list = DEFAULT_WATCHLIST + st.session_state.custom_list
-  with st.spinner("Yahoo Financeから最新株価・財務・配当を取得中..."):
+  with st.spinner("過去6年分の株価・財務・配当データを分析中..."):
     with ThreadPoolExecutor(max_workers=4) as executor:
-      raw_results = list(executor.map(analyze_single_stock, target_list))
+      raw_results = list(executor.map(analyze_mtf_stock, target_list))
 
   valid_results = [r for r in raw_results if r is not None]
   if valid_results:
-    df_res = pd.DataFrame(valid_results)
-    df_res = df_res.sort_values(
-        by="3年レンジ位置(%)", ascending=False
-    ).reset_index(drop=True)
-    st.session_state.df_res = df_res
+    st.session_state.df_res = pd.DataFrame(valid_results)
   else:
     st.error("データの取得に失敗しました。少し時間をおいて再度お試しください。")
 
-# 結果の表示エリア
 if "df_res" in st.session_state:
   df_show = st.session_state.df_res.copy()
 
@@ -367,61 +373,96 @@ if "df_res" in st.session_state:
         drop=True
     )
 
-  st.subheader(f"📊 割安・買い場ランキング（{len(df_show)}銘柄）")
-  st.caption(
-      "※「3年レンジ位置(%)」が70%以上の銘柄は、過去3年間で見て割安な買い場水準です。"
-  )
+  if sort_mode == "売り場スコア順（過熱・利確チェック）":
+    df_show = df_show.sort_values(
+        by="売り場スコア", ascending=False
+    ).reset_index(drop=True)
+  else:
+    df_show = df_show.sort_values(
+        by="買い場スコア", ascending=False
+    ).reset_index(drop=True)
 
+  st.subheader(f"📊 6期間 売買タイミング一覧（{len(df_show)}銘柄）")
   display_cols = [
       "コード",
       "銘柄名",
       "区分",
+      "総合シグナル",
+      "買い場スコア",
+      "売り場スコア",
       "現在株価(円)",
       "配当利回り(%)",
-      "3年レンジ位置(%)",
-      "買い場判定",
-      "3年平均利回り(%)",
+      "3年利回り位置(%)",
+      "14日RSI",
+      "200日線乖離(%)",
       "ROIC推移",
-      "FCF(億円)",
-      "自己資本比率(%)",
   ]
-  st.dataframe(
-      df_show[display_cols],
-      use_container_width=True,
-      hide_index=True,
-  )
+  st.dataframe(df_show[display_cols], width="stretch", hide_index=True)
 
-  # 個別銘柄の過去3年配当利回りチャート表示
+  # 6期間マルチタイムフレーム・チャートパネル表示
   st.divider()
-  st.subheader("📉 過去3年間の配当利回りチャート確認")
+  st.subheader("📉 6期間マルチタイムフレーム・チャート確認")
   selected_stock = st.selectbox(
-      "チャートを見たい銘柄を選択",
+      "6期間チャートを見たい銘柄を選択",
       df_show["コード"] + " : " + df_show["銘柄名"],
   )
   if selected_stock:
-    sel_code = selected_stock.split(" : ")[0]
-    row_data = df_show[df_show["コード"] == sel_code].iloc[0]
-    df_chart = row_data["_df_3y"]
-    mean_v = row_data["_mean_val"]
+    sel_code = selected_stock.split(" : ").head(1)[0] if False else selected_stock.split(" : ")
+    # 安全にコード抽出
+    code_str = selected_stock.split(" : ").pop(0)
+    row_data = df_show[df_show["コード"] == code_str].head(1).squeeze()
+    dfs = row_data["_dfs"]
 
-    fig, ax = plt.subplots(figsize=(8, 3.5))
-    ax.plot(
-        df_chart.index,
-        df_chart["Dividend_Yield"],
-        color="#1f77b4",
-        linewidth=1.8,
-        label="Dividend Yield (%)",
-    )
-    ax.axhline(
-        mean_v,
-        color="#ff7f0e",
-        linestyle="--",
-        linewidth=1.5,
-        label=f"3Y Mean ({mean_v:.2f}%)",
-    )
-    ax.set_ylabel("Yield (%)")
-    ax.grid(True, linestyle=":", alpha=0.6)
-    ax.legend()
-    plt.xticks(rotation=30)
+    titles = [
+        "1. 5 Years (Long)",
+        "2. 3 Years (Range)",
+        "3. 1 Year (Mid)",
+        "4. 6 Months (Dip)",
+        "5. 3 Months (Short)",
+        "6. 1 Month (Recent)",
+    ]
+
+    fig, axes = plt.subplots(2, 3, figsize=(14, 7.5))
+    for idx, (ax, sub_df, t_str) in enumerate(zip(axes.flat, dfs, titles)):
+      ax.plot(
+          sub_df.index,
+          sub_df["Close"],
+          color="#1f77b4",
+          linewidth=1.6,
+          label="Close",
+      )
+      if idx <= 2:
+        ax.plot(
+            sub_df.index,
+            sub_df["MA200"],
+            color="#d62728",
+            linestyle="--",
+            linewidth=1.1,
+            label="MA200",
+        )
+        ax.plot(
+            sub_df.index,
+            sub_df["MA75"],
+            color="#ff7f0e",
+            linestyle=":",
+            linewidth=1.1,
+            label="MA75",
+        )
+      else:
+        ax.plot(
+            sub_df.index,
+            sub_df["MA25"],
+            color="#2ca02c",
+            linestyle="--",
+            linewidth=1.2,
+            label="MA25",
+        )
+
+      ax.set_title(t_str, fontsize=10, fontweight="bold")
+      ax.grid(True, linestyle=":", alpha=0.6)
+      ax.legend(loc="upper left", fontsize=8)
+      ax.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m"))
+      ax.tick_params(axis="x", rotation=25, labelsize=8)
+
     plt.tight_layout()
     st.pyplot(fig)
