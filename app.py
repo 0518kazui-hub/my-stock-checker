@@ -197,85 +197,91 @@ def analyze_mtf_stock(item):
       signal_label = "⚡ 高値圏・新規買い控え"
     else:
       signal_label = "➡️ 中立・ホールド継続"
-
-    # 財務・ROIC推移・FCF
-    fin = ticker.financials
-    bs = ticker.balance_sheet
-    cf = ticker.cashflow
+    # 財務・ROIC推移・FCF（クラウド環境で取得エラーが出ても株価・6期間分析は止めない）
     roic_trend_str = "—"
     equity_ratio = None
     fcf_oku = None
-
-    if not fin.empty and not bs.empty:
-      latest_bs = next(iter(bs.columns))
-      total_assets = get_first_valid_value(bs, latest_bs, ["Total Assets"])
-      equity = get_first_valid_value(
-          bs,
-          latest_bs,
-          ["Stockholders Equity", "Total Equity Gross Minority Interest"],
-      )
-      if equity and total_assets and total_assets > 0:
-        equity_ratio = round((equity / total_assets) * 100, 1)
-
-      common_cols = sorted(list(set(fin.columns).intersection(set(bs.columns))))
-      roic_history = []
-      for i, col in enumerate(common_cols):
-        op_i = get_first_valid_value(
-            fin, col, ["Operating Income", "EBIT", "Operating Profit"]
-        )
-        eq_i = get_first_valid_value(
+    try:
+      fin = ticker.financials
+      bs = ticker.balance_sheet
+      cf = ticker.cashflow
+      if fin is not None and not fin.empty and bs is not None and not bs.empty:
+        latest_bs = next(iter(bs.columns))
+        total_assets = get_first_valid_value(bs, latest_bs, ["Total Assets"])
+        equity = get_first_valid_value(
             bs,
-            col,
+            latest_bs,
             ["Stockholders Equity", "Total Equity Gross Minority Interest"],
         )
-        db_i = (
-            get_first_valid_value(bs, col, ["Total Debt", "Long Term Debt"])
-            or 0.0
-        )
-        if op_i is not None and eq_i is not None and eq_i > 0:
-          ic_a = eq_i + db_i
-          if i >= 1:
-            p_col = common_cols[i - 1]
-            p_eq = get_first_valid_value(
-                bs,
-                p_col,
-                ["Stockholders Equity", "Total Equity Gross Minority Interest"],
-            )
-            p_db = (
-                get_first_valid_value(
-                    bs, p_col, ["Total Debt", "Long Term Debt"]
-                )
-                or 0.0
-            )
-            if p_eq is not None and p_eq > 0:
-              ic_a = (ic_a + (p_eq + p_db)) / 2.0
-          if ic_a > 0:
-            roic_history.append(((op_i * (1 - tax_rate)) / ic_a) * 100)
-      if roic_history:
-        roic_trend_str = "→".join(f"{r:.1f}%" for r in roic_history)
+        if equity and total_assets and total_assets > 0:
+          equity_ratio = round((equity / total_assets) * 100, 1)
 
-    if not cf.empty:
-      latest_cf = next(iter(cf.columns))
-      fcf_raw = get_first_valid_value(cf, latest_cf, ["Free Cash Flow"])
-      if fcf_raw is None:
-        ocf = get_first_valid_value(
-            cf,
-            latest_cf,
-            [
-                "Operating Cash Flow",
-                "Cash Flow From Continuing Operating Activities",
-            ],
+        common_cols = sorted(
+            list(set(fin.columns).intersection(set(bs.columns)))
         )
-        capex = (
-            get_first_valid_value(
-                cf, latest_cf, ["Capital Expenditure", "Purchase Of PPE"]
-            )
-            or 0.0
-        )
-        if ocf is not None:
-          fcf_raw = ocf + capex if capex < 0 else ocf - capex
-      if fcf_raw is not None:
-        fcf_oku = round(fcf_raw / 100_000_000, 1)
+        roic_history = []
+        for i, col in enumerate(common_cols):
+          op_i = get_first_valid_value(
+              fin, col, ["Operating Income", "EBIT", "Operating Profit"]
+          )
+          eq_i = get_first_valid_value(
+              bs,
+              col,
+              ["Stockholders Equity", "Total Equity Gross Minority Interest"],
+          )
+          db_i = (
+              get_first_valid_value(bs, col, ["Total Debt", "Long Term Debt"])
+              or 0.0
+          )
+          if op_i is not None and eq_i is not None and eq_i > 0:
+            ic_a = eq_i + db_i
+            if i >= 1:
+              p_col = common_cols[i - 1]
+              p_eq = get_first_valid_value(
+                  bs,
+                  p_col,
+                  [
+                      "Stockholders Equity",
+                      "Total Equity Gross Minority Interest",
+                  ],
+              )
+              p_db = (
+                  get_first_valid_value(
+                      bs, p_col, ["Total Debt", "Long Term Debt"]
+                  )
+                  or 0.0
+              )
+              if p_eq is not None and p_eq > 0:
+                ic_a = (ic_a + (p_eq + p_db)) / 2.0
+            if ic_a > 0:
+              roic_history.append(((op_i * (1 - tax_rate)) / ic_a) * 100)
+        if roic_history:
+          roic_trend_str = "→".join(f"{r:.1f}%" for r in roic_history)
+
+      if cf is not None and not cf.empty:
+        latest_cf = next(iter(cf.columns))
+        fcf_raw = get_first_valid_value(cf, latest_cf, ["Free Cash Flow"])
+        if fcf_raw is None:
+          ocf = get_first_valid_value(
+              cf,
+              latest_cf,
+              [
+                  "Operating Cash Flow",
+                  "Cash Flow From Continuing Operating Activities",
+              ],
+          )
+          capex = (
+              get_first_valid_value(
+                  cf, latest_cf, ["Capital Expenditure", "Purchase Of PPE"]
+              )
+              or 0.0
+          )
+          if ocf is not None:
+            fcf_raw = ocf + capex if capex < 0 else ocf - capex
+        if fcf_raw is not None:
+          fcf_oku = round(fcf_raw / 100_000_000, 1)
+    except Exception:
+      pass
 
     return {
         "コード": code.replace(".T", ""),
@@ -294,8 +300,11 @@ def analyze_mtf_stock(item):
         "自己資本比率(%)": equity_ratio,
         "_dfs": (df_5y, df_3y, df_1y, df_6m, df_3m, df_1m),
     }
-  except Exception:
+  except Exception as e:
+    st.warning(f"{stock_name}({code}) スキップ: {e}")
     return None
+
+
 
 
 # ====================================================
