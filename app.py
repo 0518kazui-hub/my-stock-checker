@@ -70,7 +70,7 @@ def load_watchlist_from_github():
   try:
     token = st.secrets["GITHUB_TOKEN"]
     repo = st.secrets["GITHUB_REPO"]
-        domain = ".".join(["api", "github", "com"])
+    domain = ".".join(["api", "github", "com"])
     path = "/".join(["repos", repo, "contents", "watchlist.json"])
     url = f"https://{domain}/{path}"
     headers = {"Authorization": f"token {token}"}
@@ -87,7 +87,7 @@ def save_watchlist_to_github(new_list):
   try:
     token = st.secrets["GITHUB_TOKEN"].strip()
     repo = st.secrets["GITHUB_REPO"].strip()
-        domain = ".".join(["api", "github", "com"])
+    domain = ".".join(["api", "github", "com"])
     path = "/".join(["repos", repo, "contents", "watchlist.json"])
     url = f"https://{domain}/{path}"
     headers = {
