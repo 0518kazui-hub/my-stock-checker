@@ -308,10 +308,33 @@ def analyze_mtf_stock(item):
 
 
 # ====================================================
-# 5. スマホアプリの画面UI（6期間マルチタイムフレーム対応）
+# 5. スマホアプリの画面UI（スマホ縦画面・完全最適化版）
 # ====================================================
-st.title("📈 My株チェッカー Pro")
-st.caption("5年・3年・1年・6M・3M・1Mの6期間統合 買い場＆売り場診断")
+st.markdown(
+    """
+    <style>
+    .app-title { font-size: 20px; font-weight: bold; margin-bottom: 2px; }
+    .sec-title { font-size: 16px; font-weight: bold; margin-top: 10px; margin-bottom: 6px; border-left: 4px solid #ff4b4b; padding-left: 8px; }
+    .stock-card {
+        background-color: #f8f9fa;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+    }
+    .card-header { font-size: 15px; font-weight: bold; color: #111; }
+    .card-tag { font-size: 11px; color: #555; margin-bottom: 4px; }
+    .card-sig { font-size: 13px; font-weight: bold; margin-bottom: 4px; }
+    .card-metrics { font-size: 12px; color: #222; line-height: 1.5; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    '<div class="app-title">📈 My株チェッカー Pro</div>', unsafe_allow_html=True
+)
+st.caption("5年〜1ヶ月の6期間統合 買い場＆売り場診断")
 
 with st.sidebar:
   st.header("⚙️ 設定・銘柄追加")
@@ -347,9 +370,9 @@ with st.sidebar:
       st.success(f"{n_fmt} を追加しました！")
 
 if st.button(
-    "🔍 6期間データ一括スキャン（約15秒）",
+    "🔍 6期間データ一括スキャン",
     type="primary",
-    width="stretch",
+    use_container_width=True,
 ):
   target_list = DEFAULT_WATCHLIST + st.session_state.custom_list
   valid_results = []
@@ -357,7 +380,7 @@ if st.button(
   status_text = st.empty()
 
   for idx, item in enumerate(target_list):
-    status_text.text(f"取得中 ({idx + 1}/{len(target_list)}): {item[1]} ...")
+    status_text.text(f"取得中 ({idx + 1}/{len(target_list)}): {item}")
     res = analyze_mtf_stock(item)
     if res is not None:
       valid_results.append(res)
@@ -369,10 +392,7 @@ if st.button(
   if valid_results:
     st.session_state.df_res = pd.DataFrame(valid_results)
   else:
-    st.error(
-        "データの取得に失敗しました。Yahoo Financeの一時制限の可能性があるため、1〜2分おいて再度お試しください。"
-    )
-
+    st.error("データの取得に失敗しました。少し時間をおいて再度お試しください。")
 
 if "df_res" in st.session_state:
   df_show = st.session_state.df_res.copy()
@@ -403,47 +423,75 @@ if "df_res" in st.session_state:
         by="買い場スコア", ascending=False
     ).reset_index(drop=True)
 
-  st.subheader(f"📊 6期間 売買タイミング一覧（{len(df_show)}銘柄）")
-  display_cols = [
-      "コード",
-      "銘柄名",
-      "区分",
-      "総合シグナル",
-      "買い場スコア",
-      "売り場スコア",
-      "現在株価(円)",
-      "配当利回り(%)",
-      "3年利回り位置(%)",
-      "14日RSI",
-      "200日線乖離(%)",
-      "ROIC推移",
-  ]
-  st.dataframe(df_show[display_cols], width="stretch", hide_index=True)
+  st.markdown(
+      f'<div class="sec-title">📊 売買タイミング一覧（{len(df_show)}銘柄）</div>',
+      unsafe_allow_html=True,
+  )
 
-  # 6期間マルチタイムフレーム・チャートパネル表示
+  # タブ切り替え：スマホ用カード表示（横スクロールなし） vs 詳細一覧表
+  tab1, tab2 = st.tabs(["📱 スマホカード表示", "📋 詳細テーブル（全項目）"])
+
+  with tab1:
+    for idx, row in df_show.iterrows():
+      st.markdown(
+          f"""
+          <div class="stock-card">
+            <div class="card-header">{idx + 1}位. [{row['コード']}] {row['銘柄名']}</div>
+            <div class="card-tag">{row['区分']}</div>
+            <div class="card-sig">{row['総合シグナル']}</div>
+            <div class="card-metrics">
+              <b>買い場: {row['買い場スコア']}点</b> ／ 売り場: {row['売り場スコア']}点<br>
+              株価: <b>{row['現在株価(円)']}円</b>（利回り: <b>{row['配当利回り(%)']}%</b>）<br>
+              3年利回り位置: {row['3年利回り位置(%)']}% ／ RSI: {row['14日RSI']} ／ 200日線乖離: {row['200日線乖離(%)']}%
+            </div>
+          </div>
+          """,
+          unsafe_allow_html=True,
+      )
+
+  with tab2:
+    display_cols = [
+        "コード",
+        "銘柄名",
+        "買い場スコア",
+        "売り場スコア",
+        "現在株価(円)",
+        "配当利回り(%)",
+        "3年利回り位置(%)",
+        "14日RSI",
+        "200日線乖離(%)",
+        "ROIC推移",
+        "総合シグナル",
+        "区分",
+    ]
+    st.dataframe(df_show[display_cols], use_container_width=True, hide_index=True)
+
+  # 6期間マルチタイムフレーム・チャートパネル表示（スマホ縦画面用：2列×3段）
   st.divider()
-  st.subheader("📉 6期間マルチタイムフレーム・チャート確認")
+  st.markdown(
+      '<div class="sec-title">📉 6期間チャート確認（5年〜1ヶ月）</div>',
+      unsafe_allow_html=True,
+  )
   selected_stock = st.selectbox(
-      "6期間チャートを見たい銘柄を選択",
+      "銘柄を選択",
       df_show["コード"] + " : " + df_show["銘柄名"],
   )
   if selected_stock:
-    sel_code = selected_stock.split(" : ").head(1)[0] if False else selected_stock.split(" : ")
-    # 安全にコード抽出
     code_str = selected_stock.split(" : ").pop(0)
     row_data = df_show[df_show["コード"] == code_str].head(1).squeeze()
     dfs = row_data["_dfs"]
 
     titles = [
-        "1. 5 Years (Long)",
-        "2. 3 Years (Range)",
-        "3. 1 Year (Mid)",
-        "4. 6 Months (Dip)",
-        "5. 3 Months (Short)",
-        "6. 1 Month (Recent)",
+        "1. 5 Years",
+        "2. 3 Years",
+        "3. 1 Year",
+        "4. 6 Months",
+        "5. 3 Months",
+        "6. 1 Month",
     ]
 
-    fig, axes = plt.subplots(2, 3, figsize=(14, 7.5))
+    # スマホ縦画面でも大きく見やすい「横2列 × 縦3段」レイアウト
+    fig, axes = plt.subplots(3, 2, figsize=(8, 9.5))
     for idx, (ax, sub_df, t_str) in enumerate(zip(axes.flat, dfs, titles)):
       ax.plot(
           sub_df.index,
@@ -481,9 +529,11 @@ if "df_res" in st.session_state:
 
       ax.set_title(t_str, fontsize=10, fontweight="bold")
       ax.grid(True, linestyle=":", alpha=0.6)
-      ax.legend(loc="upper left", fontsize=8)
+      ax.legend(loc="upper left", fontsize=7)
       ax.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m"))
       ax.tick_params(axis="x", rotation=25, labelsize=8)
+      ax.tick_params(axis="y", labelsize=8)
 
     plt.tight_layout()
     st.pyplot(fig)
+
