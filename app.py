@@ -70,7 +70,7 @@ def load_watchlist_from_github():
   try:
     token = st.secrets["GITHUB_TOKEN"]
     repo = st.secrets["GITHUB_REPO"]
-    url = f"https://github.com{repo}/contents/watchlist.json"
+    url = "https://api." + f"://github.com{repo}/contents/watchlist.json"
     headers = {"Authorization": f"token {token}"}
     res = requests.get(url, headers=headers, timeout=5)
     if res.status_code == 200:
@@ -85,7 +85,7 @@ def save_watchlist_to_github(new_list):
   try:
     token = st.secrets["GITHUB_TOKEN"].strip()
     repo = st.secrets["GITHUB_REPO"].strip()
-    url = f"https://github.com{repo}/contents/watchlist.json"
+    url = "https://api." + f"://github.com{repo}/contents/watchlist.json"
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
