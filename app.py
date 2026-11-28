@@ -83,10 +83,13 @@ def load_watchlist_from_github():
 
 def save_watchlist_to_github(new_list):
   try:
-    token = st.secrets["GITHUB_TOKEN"]
-    repo = st.secrets["GITHUB_REPO"]
+    token = st.secrets["GITHUB_TOKEN"].strip()
+    repo = st.secrets["GITHUB_REPO"].strip()
     url = f"https://github.com{repo}/contents/watchlist.json"
-    headers = {"Authorization": f"token {token}"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
     get_res = requests.get(url, headers=headers, timeout=5)
     sha = get_res.json().get("sha") if get_res.status_code == 200 else None
 
@@ -99,9 +102,18 @@ def save_watchlist_to_github(new_list):
     if sha:
       payload["sha"] = sha
     put_res = requests.put(url, headers=headers, json=payload, timeout=8)
-    return put_res.status_code in (200, 201)
-  except Exception:
+    if put_res.status_code in (200, 201):
+      return True
+    else:
+      st.error(
+          f"GitHubエラー ({put_res.status_code}):"
+          f" {put_res.json().get('message')}"
+      )
+      return False
+  except Exception as e:
+    st.error(f"通信エラー: {e}")
     return False
+
 
 
 if "watchlist" not in st.session_state:
