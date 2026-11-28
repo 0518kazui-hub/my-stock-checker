@@ -290,7 +290,7 @@ def analyze_mtf_stock(item):
         "総合シグナル": signal_label,
         "買い場スコア": buy_score,
         "売り場スコア": sell_score,
-        "現在株価(円)": round(current_price, 1),
+        "現在株価(円)": round(latest_close, 1),
         "配当利回り(%)": round(latest_yield, 2),
         "3年利回り位置(%)": round(yield_pos_3y, 1),
         "14日RSI": round(latest_rsi, 1),
