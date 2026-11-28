@@ -22,8 +22,13 @@ if "authenticated" not in st.session_state:
   st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-  st.title("📈 My株チェッカー Pro（ログイン）")
+  st.markdown(
+      '<div style="font-size: 20px; font-weight: bold; margin-bottom: 10px;">'
+      "📈 My株チェッカー（ログイン）</div>",
+      unsafe_allow_html=True,
+  )
   pwd = st.text_input("パスワードを入力してください", type="password")
+
   if st.button("ログイン"):
     if pwd == APP_PASSWORD:
       st.session_state.authenticated = True
