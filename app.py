@@ -1,12 +1,13 @@
+import base64
 from concurrent.futures import ThreadPoolExecutor
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
-import matplotlib_fontja
+import json
 import time
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import matplotlib_fontja
 import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
 import yfinance as yf
 
@@ -19,7 +20,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# 簡易パスワード保護
 APP_PASSWORD = "7777"
 if "authenticated" not in st.session_state:
   st.session_state.authenticated = False
@@ -31,7 +31,6 @@ if not st.session_state.authenticated:
       unsafe_allow_html=True,
   )
   pwd = st.text_input("パスワードを入力してください", type="password")
-
   if st.button("ログイン"):
     if pwd == APP_PASSWORD:
       st.session_state.authenticated = True
@@ -41,34 +40,72 @@ if not st.session_state.authenticated:
   st.stop()
 
 # ====================================================
-# 2. デフォルトの保有株・国策ウォッチリスト（全19社）
+# 2. 永続化ウォッチリスト（GitHubへ自動保存・読み込み）
 # ====================================================
-DEFAULT_WATCHLIST = [
-    # --- 保有・買付依頼中の主力ポートフォリオ ---
-    ("9434.T", "ソフトバンク", "【保有】通信インフラ"),
-    ("9432.T", "NTT", "【保有】通信インフラ"),
-    ("1414.T", "ショーボンドHD", "【保有】国策インフラ補修"),
-    ("6200.T", "インソース", "【保有】人材・DX研修"),
-    ("5802.T", "住友電気工業", "【保有】電力・通信網"),
-    ("6902.T", "デンソー", "【依頼中】自動車・モビリティ"),
-    ("4828.T", "ビジネスエンジニアリング", "【依頼中】企業DX・ERP"),
-    ("8593.T", "三菱HCキャピタル", "【指値待】連続増配リース"),
-    # --- 国策①：レアアース・資源安保 ---
-    ("5714.T", "DOWAホールディングス", "【レアアース】都市鉱山"),
-    ("5471.T", "大同特殊鋼", "【レアアース】省レアアース磁石"),
-    ("5711.T", "三菱マテリアル", "【レアアース】リサイクル・非鉄"),
-    ("4063.T", "信越化学工業", "【レアアース】磁石・半導体素材"),
-    ("6269.T", "三井海洋開発", "【レアアース】深海資源開発"),
-    # --- 国策②：防衛・安全保障 ---
-    ("7011.T", "三菱重工業", "【防衛】防衛装備・重工"),
-    ("7012.T", "川崎重工業", "【防衛】潜水艦・航空機"),
-    ("7013.T", "IHI", "【防衛】航空エンジン・宇宙"),
-    ("6503.T", "三菱電機", "【防衛】防衛レーダー・電子"),
-    ("6701.T", "NEC", "【防衛】防衛通信・サイバー"),
-    # --- 監視・打診候補：高配当インフラ ---
-    ("1911.T", "住友林業", "【監視】住宅・資源インフラ"),
-    ("5805.T", "ＳＷＣＣ", "【監視】電力・DCケーブル"),
+INITIAL_WATCHLIST = [
+    ["9434.T", "ソフトバンク", "【保有】通信インフラ"],
+    ["9432.T", "NTT", "【保有】通信インフラ"],
+    ["1414.T", "ショーボンドHD", "【保有】国策インフラ補修"],
+    ["6200.T", "インソース", "【保有】人材・DX研修"],
+    ["5802.T", "住友電気工業", "【保有】電力・通信網"],
+    ["6902.T", "デンソー", "【依頼中】自動車・モビリティ"],
+    ["4828.T", "ビジネスエンジニアリング", "【依頼中】企業DX・ERP"],
+    ["8593.T", "三菱HCキャピタル", "【指値待】連続増配リース"],
+    ["5714.T", "DOWAホールディングス", "【レアアース】都市鉱山"],
+    ["5471.T", "大同特殊鋼", "【レアアース】省レアアース磁石"],
+    ["5711.T", "三菱マテリアル", "【レアアース】リサイクル・非鉄"],
+    ["4063.T", "信越化学工業", "【レアアース】磁石・半導体素材"],
+    ["6269.T", "三井海洋開発", "【レアアース】深海資源開発"],
+    ["7011.T", "三菱重工業", "【防衛】防衛装備・重工"],
+    ["7012.T", "川崎重工業", "【防衛】潜水艦・航空機"],
+    ["7013.T", "IHI", "【防衛】航空エンジン・宇宙"],
+    ["6503.T", "三菱電機", "【防衛】防衛レーダー・電子"],
+    ["6701.T", "NEC", "【防衛】防衛通信・サイバー"],
+    ["1911.T", "住友林業", "【監視】住宅・資源インフラ"],
+    ["5805.T", "ＳＷＣＣ", "【監視】電力・DCケーブル"],
 ]
+
+
+def load_watchlist_from_github():
+  try:
+    token = st.secrets["GITHUB_TOKEN"]
+    repo = st.secrets["GITHUB_REPO"]
+    url = f"https://github.com{repo}/contents/watchlist.json"
+    headers = {"Authorization": f"token {token}"}
+    res = requests.get(url, headers=headers, timeout=5)
+    if res.status_code == 200:
+      content = base64.b64decode(res.json()["content"]).decode("utf-8")
+      return json.loads(content)
+  except Exception:
+    pass
+  return INITIAL_WATCHLIST
+
+
+def save_watchlist_to_github(new_list):
+  try:
+    token = st.secrets["GITHUB_TOKEN"]
+    repo = st.secrets["GITHUB_REPO"]
+    url = f"https://github.com{repo}/contents/watchlist.json"
+    headers = {"Authorization": f"token {token}"}
+    get_res = requests.get(url, headers=headers, timeout=5)
+    sha = get_res.json().get("sha") if get_res.status_code == 200 else None
+
+    json_str = json.dumps(new_list, ensure_ascii=False, indent=2)
+    b64_content = base64.b64encode(json_str.encode("utf-8")).decode("utf-8")
+    payload = {
+        "message": "Update watchlist via MyStockChecker App",
+        "content": b64_content,
+    }
+    if sha:
+      payload["sha"] = sha
+    put_res = requests.put(url, headers=headers, json=payload, timeout=8)
+    return put_res.status_code in (200, 201)
+  except Exception:
+    return False
+
+
+if "watchlist" not in st.session_state:
+  st.session_state.watchlist = load_watchlist_from_github()
 
 
 # ====================================================
@@ -345,7 +382,7 @@ st.markdown(
 st.caption("5年〜1ヶ月の6期間統合 買い場＆売り場診断")
 
 with st.sidebar:
-  st.header("⚙️ 設定・銘柄追加")
+  st.header("⚙️ ウォッチリスト管理")
   filter_tag = st.selectbox(
       "表示するカテゴリ",
       [
@@ -361,28 +398,71 @@ with st.sidebar:
       ["買い場スコア順（押し目探し）", "売り場スコア順（過熱・利確チェック）"],
   )
   st.divider()
-  st.subheader("➕ 臨時で銘柄を追加監視")
-  extra_code = st.text_input("証券コード（4桁・例: 8056）", "")
-  extra_name = st.text_input("銘柄名（例: BIPROGY）", "")
-  if "custom_list" not in st.session_state:
-    st.session_state.custom_list = []
-  if st.button("リストに追加"):
-    if extra_code.strip():
+
+  # --- ① 新規追加・区分変更（自動保存） ---
+  st.subheader("➕ 銘柄を追加・区分変更（自動保存）")
+  new_code = st.text_input("証券コード（4桁・例: 8056）", "")
+  new_name = st.text_input("銘柄名（例: BIPROGY）", "")
+  new_tag = st.selectbox(
+      "区分・カテゴリ",
+      [
+          "【保有】主力株",
+          "【依頼中】買付待機",
+          "【レアアース】国策",
+          "【防衛】国策",
+          "【監視】押し目待ち",
+      ],
+  )
+  if st.button("追加・更新して保存", use_container_width=True):
+    if new_code.strip():
       c_fmt = (
-          extra_code.strip() + ".T"
-          if not extra_code.strip().endswith(".T")
-          else extra_code.strip()
+          new_code.strip() + ".T"
+          if not new_code.strip().endswith(".T")
+          else new_code.strip()
       )
-      n_fmt = extra_name.strip() if extra_name.strip() else c_fmt
-      st.session_state.custom_list.append((c_fmt, n_fmt, "【追加】カスタム"))
-      st.success(f"{n_fmt} を追加しました！")
+      n_fmt = new_name.strip() if new_name.strip() else c_fmt
+      updated = [
+          x
+          for x in st.session_state.watchlist
+          if next(iter(x)) != c_fmt
+      ]
+      updated.append([c_fmt, n_fmt, new_tag])
+      if save_watchlist_to_github(updated):
+        st.session_state.watchlist = updated
+        st.success(f"{n_fmt} を保存しました！")
+      else:
+        st.error("保存に失敗しました（Secrets設定を確認してください）")
+
+  st.divider()
+
+  # --- ② 削除（自動保存） ---
+  st.subheader("🗑️ 銘柄を削除（自動保存）")
+  del_options = [
+      f"{x[0]} : {x[1]}" for x in st.session_state.watchlist
+  ]
+  del_target = st.selectbox("削除する銘柄を選択", del_options)
+  if st.button("削除して保存", use_container_width=True):
+    if del_target:
+      del_code = del_target.split(" : ").pop(0)
+      updated = [
+          x
+          for x in st.session_state.watchlist
+          if next(iter(x)) != del_code
+      ]
+      if save_watchlist_to_github(updated):
+        st.session_state.watchlist = updated
+        st.success(f"{del_target} を削除しました！")
+        st.rerun()
+      else:
+        st.error("削除の保存に失敗しました")
 
 if st.button(
     "🔍 6期間データ一括スキャン",
     type="primary",
     use_container_width=True,
 ):
-  target_list = DEFAULT_WATCHLIST + st.session_state.custom_list
+  target_list = st.session_state.watchlist
+
   valid_results = []
   progress_bar = st.progress(0)
   status_text = st.empty()
