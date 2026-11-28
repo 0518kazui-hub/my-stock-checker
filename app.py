@@ -466,10 +466,10 @@ if "df_res" in st.session_state:
     ]
     st.dataframe(df_show[display_cols], use_container_width=True, hide_index=True)
 
-  # 6期間マルチタイムフレーム・チャートパネル表示（スマホ縦画面用：2列×3段）
+  # 6期間マルチタイムフレーム・チャートパネル表示（スマホ画面横幅いっぱい・1列×6段）
   st.divider()
   st.markdown(
-      '<div class="sec-title">📉 6期間チャート確認（5年〜1ヶ月）</div>',
+      '<div class="sec-title">📉 6期間チャート確認</div>',
       unsafe_allow_html=True,
   )
   selected_stock = st.selectbox(
@@ -482,22 +482,22 @@ if "df_res" in st.session_state:
     dfs = row_data["_dfs"]
 
     titles = [
-        "1. 5 Years",
-        "2. 3 Years",
-        "3. 1 Year",
-        "4. 6 Months",
-        "5. 3 Months",
-        "6. 1 Month",
+        "5年",
+        "3年",
+        "1年",
+        "6ヶ月",
+        "3ヶ月",
+        "1ヶ月",
     ]
 
-    # スマホ縦画面でも大きく見やすい「横2列 × 縦3段」レイアウト
-    fig, axes = plt.subplots(3, 2, figsize=(8, 9.5))
-    for idx, (ax, sub_df, t_str) in enumerate(zip(axes.flat, dfs, titles)):
+    # スマホ画面の横幅いっぱいに1つずつ大きく表示（縦6段）
+    for idx, (sub_df, t_str) in enumerate(zip(dfs, titles)):
+      fig, ax = plt.subplots(figsize=(6, 2.8))
       ax.plot(
           sub_df.index,
           sub_df["Close"],
           color="#1f77b4",
-          linewidth=1.6,
+          linewidth=1.8,
           label="Close",
       )
       if idx <= 2:
@@ -506,7 +506,7 @@ if "df_res" in st.session_state:
             sub_df["MA200"],
             color="#d62728",
             linestyle="--",
-            linewidth=1.1,
+            linewidth=1.2,
             label="MA200",
         )
         ax.plot(
@@ -514,7 +514,7 @@ if "df_res" in st.session_state:
             sub_df["MA75"],
             color="#ff7f0e",
             linestyle=":",
-            linewidth=1.1,
+            linewidth=1.2,
             label="MA75",
         )
       else:
@@ -523,17 +523,18 @@ if "df_res" in st.session_state:
             sub_df["MA25"],
             color="#2ca02c",
             linestyle="--",
-            linewidth=1.2,
+            linewidth=1.3,
             label="MA25",
         )
 
-      ax.set_title(t_str, fontsize=10, fontweight="bold")
+      ax.set_title(t_str, fontsize=12, fontweight="bold")
       ax.grid(True, linestyle=":", alpha=0.6)
-      ax.legend(loc="upper left", fontsize=7)
+      ax.legend(loc="upper left", fontsize=8)
       ax.xaxis.set_major_formatter(mdates.DateFormatter("%y/%m"))
-      ax.tick_params(axis="x", rotation=25, labelsize=8)
-      ax.tick_params(axis="y", labelsize=8)
+      ax.tick_params(axis="x", rotation=20, labelsize=9)
+      ax.tick_params(axis="y", labelsize=9)
 
-    plt.tight_layout()
-    st.pyplot(fig)
+      plt.tight_layout()
+      st.pyplot(fig, use_container_width=True)
+      plt.close(fig)
 
