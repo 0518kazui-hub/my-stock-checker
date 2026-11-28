@@ -541,74 +541,46 @@ if "df_res" in st.session_state:
         by="買い場スコア", ascending=False
     ).reset_index(drop=True)
 
-  st.markdown(
-      f'<div class="sec-title">📊 売買タイミング一覧（{len(df_show)}銘柄）</div>',
-      unsafe_allow_html=True,
-  )
+  # 選択中のチャート銘柄を保持するステート
+  if "selected_chart_code" not in st.session_state:
+    st.session_state.selected_chart_code = None
 
-  # タブ切り替え：スマホ用カード表示（横スクロールなし） vs 詳細一覧表
-  tab1, tab2 = st.tabs(["📱 スマホカード表示", "📋 詳細テーブル（全項目）"])
+  # ====================================================
+  # パターンA：特定の銘柄がタップされた場合（6期間チャート専用画面）
+  # ====================================================
+  if st.session_state.selected_chart_code is not None:
+    target_code = st.session_state.selected_chart_code
+    matched = df_show[df_show["コード"] == target_code]
 
-  with tab1:
-    for idx, row in df_show.iterrows():
-      st.markdown(
-          f"""
-          <div class="stock-card">
-            <div class="card-header">{idx + 1}位. [{row['コード']}] {row['銘柄名']}</div>
-            <div class="card-tag">{row['区分']}</div>
-            <div class="card-sig">{row['総合シグナル']}</div>
-            <div class="card-metrics">
-              <b>買い場: {row['買い場スコア']}点</b> ／ 売り場: {row['売り場スコア']}点<br>
-              株価: <b>{row['現在株価(円)']}円</b>（利回り: <b>{row['配当利回り(%)']}%</b>）<br>
-              3年利回り位置: {row['3年利回り位置(%)']}% ／ RSI: {row['14日RSI']} ／ 200日線乖離: {row['200日線乖離(%)']}%
-            </div>
+    if matched.empty:
+      st.session_state.selected_chart_code = None
+      st.rerun()
+
+    row_data = matched.head(1).squeeze()
+
+    if st.button("⬅️ 売買タイミング一覧に戻る", use_container_width=True):
+      st.session_state.selected_chart_code = None
+      st.rerun()
+
+    st.markdown(
+        f"""
+        <div class="stock-card" style="margin-top: 8px;">
+          <div class="card-header">[{row_data['コード']}] {row_data['銘柄名']}</div>
+          <div class="card-tag">{row_data['区分']}</div>
+          <div class="card-sig">{row_data['総合シグナル']}</div>
+          <div class="card-metrics">
+            <b>買い場: {row_data['買い場スコア']}点</b> ／ 売り場: {row_data['売り場スコア']}点<br>
+            株価: <b>{row_data['現在株価(円)']}円</b>（利回り: <b>{row_data['配当利回り(%)']}%</b>）<br>
+            3年利回り位置: {row_data['3年利回り位置(%)']}% ／ RSI: {row_data['14日RSI']} ／ 200日線乖離: {row_data['200日線乖離(%)']}%
           </div>
-          """,
-          unsafe_allow_html=True,
-      )
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-  with tab2:
-    display_cols = [
-        "コード",
-        "銘柄名",
-        "買い場スコア",
-        "売り場スコア",
-        "現在株価(円)",
-        "配当利回り(%)",
-        "3年利回り位置(%)",
-        "14日RSI",
-        "200日線乖離(%)",
-        "ROIC推移",
-        "総合シグナル",
-        "区分",
-    ]
-    st.dataframe(df_show[display_cols], use_container_width=True, hide_index=True)
-
-  # 6期間マルチタイムフレーム・チャートパネル表示（スマホ画面横幅いっぱい・1列×6段）
-  st.divider()
-  st.markdown(
-      '<div class="sec-title">📉 6期間チャート確認</div>',
-      unsafe_allow_html=True,
-  )
-  selected_stock = st.selectbox(
-      "銘柄を選択",
-      df_show["コード"] + " : " + df_show["銘柄名"],
-  )
-  if selected_stock:
-    code_str = selected_stock.split(" : ").pop(0)
-    row_data = df_show[df_show["コード"] == code_str].head(1).squeeze()
     dfs = row_data["_dfs"]
+    titles = ["5年", "3年", "1年", "6ヶ月", "3ヶ月", "1ヶ月"]
 
-    titles = [
-        "5年",
-        "3年",
-        "1年",
-        "6ヶ月",
-        "3ヶ月",
-        "1ヶ月",
-    ]
-
-    # スマホ画面の横幅いっぱいに1つずつ大きく表示（縦6段）
     for idx, (sub_df, t_str) in enumerate(zip(dfs, titles)):
       fig, ax = plt.subplots(figsize=(6, 2.8))
       ax.plot(
@@ -656,3 +628,66 @@ if "df_res" in st.session_state:
       st.pyplot(fig, use_container_width=True)
       plt.close(fig)
 
+    if st.button(
+        "⬅️ 売買タイミング一覧に戻る（下部）",
+        key="back_bottom",
+        use_container_width=True,
+    ):
+      st.session_state.selected_chart_code = None
+      st.rerun()
+
+  # ====================================================
+  # パターンB：通常時（スマホカード一覧 ＋ 詳細テーブル）
+  # ====================================================
+  else:
+    st.markdown(
+        f'<div class="sec-title">📊 売買タイミング一覧（{len(df_show)}銘柄）</div>',
+        unsafe_allow_html=True,
+    )
+
+    tab1, tab2 = st.tabs(["📱 スマホカード表示", "📋 詳細テーブル（全項目）"])
+
+    with tab1:
+      for idx, row in df_show.iterrows():
+        st.markdown(
+            f"""
+            <div class="stock-card" style="margin-bottom: 4px;">
+              <div class="card-header">{idx + 1}位. [{row['コード']}] {row['銘柄名']}</div>
+              <div class="card-tag">{row['区分']}</div>
+              <div class="card-sig">{row['総合シグナル']}</div>
+              <div class="card-metrics">
+                <b>買い場: {row['買い場スコア']}点</b> ／ 売り場: {row['売り場スコア']}点<br>
+                株価: <b>{row['現在株価(円)']}円</b>（利回り: <b>{row['配当利回り(%)']}%</b>）<br>
+                3年利回り位置: {row['3年利回り位置(%)']}% ／ RSI: {row['14日RSI']} ／ 200日線乖離: {row['200日線乖離(%)']}%
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button(
+            f"📉 {row['銘柄名']} の6期間チャートを見る",
+            key=f"btn_chart_{row['コード']}",
+            use_container_width=True,
+        ):
+          st.session_state.selected_chart_code = row["コード"]
+          st.rerun()
+        st.markdown('<div style="margin-bottom: 8px;"></div>', unsafe_allow_html=True)
+
+    with tab2:
+      display_cols = [
+          "コード",
+          "銘柄名",
+          "買い場スコア",
+          "売り場スコア",
+          "現在株価(円)",
+          "配当利回り(%)",
+          "3年利回り位置(%)",
+          "14日RSI",
+          "200日線乖離(%)",
+          "ROIC推移",
+          "総合シグナル",
+          "区分",
+      ]
+      st.dataframe(
+          df_show[display_cols], use_container_width=True, hide_index=True
+      )
