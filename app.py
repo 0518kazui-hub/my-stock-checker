@@ -1,4 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import matplotlib_fontja
 import time
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
