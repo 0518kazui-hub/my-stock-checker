@@ -415,10 +415,10 @@ with st.sidebar:
   )
   st.divider()
 
-  # --- ① 新規追加・区分変更（自動保存） ---
+  # --- ① 新規追加・区分変更（自動保存・銘柄名自動取得） ---
   st.subheader("➕ 銘柄を追加・区分変更（自動保存）")
   new_code = st.text_input("証券コード（4桁・例: 8056）", "")
-  new_name = st.text_input("銘柄名（例: BIPROGY）", "")
+  new_name = st.text_input("銘柄名（空欄なら自動取得）", "")
   new_tag = st.selectbox(
       "区分・カテゴリ",
       [
@@ -436,18 +436,32 @@ with st.sidebar:
           if not new_code.strip().endswith(".T")
           else new_code.strip()
       )
-      n_fmt = new_name.strip() if new_name.strip() else c_fmt
-      updated = [
-          x
-          for x in st.session_state.watchlist
-          if next(iter(x)) != c_fmt
-      ]
-      updated.append([c_fmt, n_fmt, new_tag])
-      if save_watchlist_to_github(updated):
-        st.session_state.watchlist = updated
-        st.success(f"{n_fmt} を保存しました！")
-      else:
-        st.error("保存に失敗しました（Secrets設定を確認してください）")
+      with st.spinner("銘柄情報を確認・取得中..."):
+        try:
+          tk = yf.Ticker(c_fmt)
+          hist_check = tk.history(period="5d")
+          if hist_check.empty:
+            st.error(f"エラー: {c_fmt} は存在しないか上場廃止のコードです。")
+          else:
+            auto_name = new_name.strip()
+            if not auto_name:
+              info_dict = tk.info or {}
+              auto_name = (
+                  info_dict.get("shortName")
+                  or info_dict.get("longName")
+                  or c_fmt
+              )
+            updated = [
+                x for x in st.session_state.watchlist if next(iter(x)) != c_fmt
+            ]
+            updated.append([c_fmt, auto_name, new_tag])
+            if save_watchlist_to_github(updated):
+              st.session_state.watchlist = updated
+              st.success(f"「{auto_name} ({c_fmt})」を保存しました！")
+            else:
+              st.error("保存に失敗しました（Secrets設定を確認してください）")
+        except Exception as e:
+          st.error(f"銘柄確認エラー: {e}")
 
   st.divider()
 
